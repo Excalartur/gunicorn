@@ -146,7 +146,10 @@ def _sock_type(addr):
         else:
             sock_type = TCPSocket
     elif isinstance(addr, (str, bytes)):
-        sock_type = UnixSocket
+        if addr.startswith('\0'):
+            sock_type = AbstractUnixSocket
+        else:
+            sock_type = UnixSocket
     else:
         raise TypeError("Unable to create socket from: %r" % addr)
     return sock_type
