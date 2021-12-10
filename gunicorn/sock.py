@@ -98,9 +98,20 @@ class TCP6Socket(TCPSocket):
         return "http://[%s]:%d" % (host, port)
 
 
-class UnixSocket(BaseSocket):
+class UnixSocketBase(BaseSocket):
 
     FAMILY = socket.AF_UNIX
+
+    def __init__(self, addr, conf, log, fd=None):
+        super().__init__(addr, conf, log, fd=fd)
+    
+    def __str__(self):
+        return "unix:%s" % self.cfg_addr
+    
+
+    
+
+class UnixSocket(UnixSocketBase):
 
     def __init__(self, addr, conf, log, fd=None):
         if fd is None:
@@ -116,14 +127,16 @@ class UnixSocket(BaseSocket):
                     raise ValueError("%r is not a socket" % addr)
         super().__init__(addr, conf, log, fd=fd)
 
-    def __str__(self):
-        return "unix:%s" % self.cfg_addr
-
     def bind(self, sock):
         old_umask = os.umask(self.conf.umask)
         sock.bind(self.cfg_addr)
         util.chown(self.cfg_addr, self.conf.uid, self.conf.gid)
         os.umask(old_umask)
+
+class AbstractUnixSocket(UnixSocketBase):
+
+    def bind(self, sock):
+        sock.bind(self.cfg_addr)
 
 
 def _sock_type(addr):
