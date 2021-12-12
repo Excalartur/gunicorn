@@ -2,17 +2,23 @@
 #
 # This file is part of gunicorn released under the MIT license.
 # See the NOTICE for more information.
+
 import errno
 import os
 import socket
 import stat
 import sys
 import time
+
 from gunicorn import util
+
+
 class BaseSocket(object):
+
     def __init__(self, address, conf, log, fd=None):
         self.log = log
         self.conf = conf
+
         self.cfg_addr = address
         if fd is None:
             sock = socket.socket(self.FAMILY, socket.SOCK_STREAM)
@@ -21,11 +27,15 @@ class BaseSocket(object):
             sock = socket.fromfd(fd, self.FAMILY, socket.SOCK_STREAM)
             os.close(fd)
             bound = True
+
         self.sock = self.set_options(sock, bound=bound)
+
     def __str__(self):
         return "<socket %d>" % self.sock.fileno()
+
     def __getattr__(self, name):
         return getattr(self.sock, name)
+
     def set_options(self, sock, bound=False):
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         if (self.conf.reuse_port
@@ -38,48 +48,73 @@ class BaseSocket(object):
         if not bound:
             self.bind(sock)
         sock.setblocking(0)
+
         # make sure that the socket can be inherited
         if hasattr(sock, "set_inheritable"):
             sock.set_inheritable(True)
+
         sock.listen(self.conf.backlog)
         return sock
+
     def bind(self, sock):
         sock.bind(self.cfg_addr)
+
     def close(self):
         if self.sock is None:
             return
+
         try:
             self.sock.close()
         except socket.error as e:
             self.log.info("Error while closing socket %s", str(e))
+
         self.sock = None
+
     @classmethod
     def address_str(cls, address):
         return str(address)
+
+
 class TCPSocket(BaseSocket):
+
     FAMILY = socket.AF_INET
+
     def __str__(self):
         if self.conf.is_ssl:
             scheme = "https"
         else:
             scheme = "http"
+
         addr = self.sock.getsockname()
         return "%s://%s:%d" % (scheme, addr[0], addr[1])
+
     def set_options(self, sock, bound=False):
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         return super().set_options(sock, bound=bound)
+
+
 class TCP6Socket(TCPSocket):
+
     FAMILY = socket.AF_INET6
+
     def __str__(self):
         (host, port, _, _) = self.sock.getsockname()
         return "http://[%s]:%d" % (host, port)
+
+
 class BaseUnixSocket(BaseSocket):
+
     FAMILY = socket.AF_UNIX
+
     def __init__(self, addr, conf, log, fd=None):
         super().__init__(addr, conf, log, fd=fd)
+    
     def __str__(self):
         return "unix:%s" % self.cfg_addr
+
+
 class UnixSocket(BaseUnixSocket):
+
     def __init__(self, addr, conf, log, fd=None):
         if fd is None:
             try:
@@ -93,19 +128,27 @@ class UnixSocket(BaseUnixSocket):
                 else:
                     raise ValueError("%r is not a socket" % addr)
         super().__init__(addr, conf, log, fd=fd)
+
     def bind(self, sock):
         old_umask = os.umask(self.conf.umask)
         sock.bind(self.cfg_addr)
         util.chown(self.cfg_addr, self.conf.uid, self.conf.gid)
         os.umask(old_umask)
+
+
 class AbstractUnixSocket(BaseUnixSocket):
+
     def __str__(self):
         return "unix:%s" % self.address_str(self.cfg_addr)
+
     def bind(self, sock):
         sock.bind(self.cfg_addr)
+
     @classmethod
     def address_str(cls, address):
         return str(address).replace('\0', '@', 1)
+
+
 def _sock_type(addr):
     if isinstance(addr, tuple):
         if util.is_ipv6(addr[0]):
@@ -122,26 +165,33 @@ def _sock_type(addr):
     else:
         raise TypeError("Unable to create socket from: %r" % addr)
     return sock_type
+
+
 def create_sockets(conf, log, fds=None):
     """
     Create a new socket for the configured addresses or file descriptors.
+
     If a configured address is a tuple then a TCP socket is created.
     If it is a string, a Unix socket is created. Otherwise, a TypeError is
     raised.
     """
     listeners = []
+
     # get it only once
     addr = conf.address
     fdaddr = [bind for bind in addr if isinstance(bind, int)]
     if fds:
         fdaddr += list(fds)
     laddr = [bind for bind in addr if not isinstance(bind, int)]
+
     # check ssl config early to raise the error on startup
     # only the certfile is needed since it can contains the keyfile
     if conf.certfile and not os.path.exists(conf.certfile):
         raise ValueError('certfile "%s" does not exist' % conf.certfile)
+
     if conf.keyfile and not os.path.exists(conf.keyfile):
         raise ValueError('keyfile "%s" does not exist' % conf.keyfile)
+
     # sockets are already bound
     if fdaddr:
         for fd in fdaddr:
@@ -150,7 +200,9 @@ def create_sockets(conf, log, fds=None):
             sock_type = _sock_type(sock_name)
             listener = sock_type(sock_name, conf, log, fd=fd)
             listeners.append(listener)
+
         return listeners
+
     # no sockets is bound, first initialization of gunicorn in this env.
     for addr in laddr:
         sock_type = _sock_type(addr)
@@ -170,14 +222,20 @@ def create_sockets(conf, log, fds=None):
                     time.sleep(1)
             else:
                 break
+
         if sock is None:
             log.error("Can't connect to %s", sock_type.address_str(addr))
             sys.exit(1)
+
         listeners.append(sock)
+
     return listeners
+
+
 def close_sockets(listeners, unlink=True):
     for sock in listeners:
         sock_name = sock.getsockname()
         sock.close()
         if unlink and _sock_type(sock_name) is UnixSocket:
             os.unlink(sock_name)
+
